@@ -79,6 +79,20 @@ export interface MasterEffectsConfig {
   masterVolume: number; // 0 to 1.5
 }
 
+export type PadGridSize = 9 | 12 | 15 | 16;
+
+export type KeyboardLayoutPreset = 'qwerty' | 'numpad' | 'compact' | 'custom';
+
+export interface KeyboardSettings {
+  enabled: boolean;
+  showKeyLabels: boolean;
+  preset: KeyboardLayoutPreset;
+  keyMap: Record<number, string>; // padIndex (0 to 15) -> KeyboardEvent.code
+  gridSize: PadGridSize;
+  midiEnabled: boolean;
+  midiDeviceName?: string;
+}
+
 export interface SoundKit {
   id: string;
   name: string;

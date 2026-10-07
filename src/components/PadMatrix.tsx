@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PadConfig, PadBank, SixteenLevelsMode } from '../types';
+import { PadConfig, PadBank, SixteenLevelsMode, KeyboardSettings, PadGridSize } from '../types';
 import { audioEngine } from '../audio/engine';
-import { VolumeX, Volume2, Sparkles, Sliders, Repeat, Layers } from 'lucide-react';
+import { formatKeyDisplay, getGridOrder } from '../audio/keyboardService';
+import { VolumeX, Volume2, Sparkles, Sliders, Repeat, Layers, Keyboard, LayoutGrid } from 'lucide-react';
 
 interface PadMatrixProps {
   pads: PadConfig[];
@@ -22,6 +23,10 @@ interface PadMatrixProps {
   setPadMuteMode: (val: boolean) => void;
   onTogglePadMute: (padId: number) => void;
   onTogglePadSolo: (padId: number) => void;
+  keyboardSettings: KeyboardSettings;
+  onOpenKeyboardSettings: () => void;
+  onSelectGridSize: (size: PadGridSize) => void;
+  externalHitPadId?: number | null;
 }
 
 export const PadMatrix: React.FC<PadMatrixProps> = ({
@@ -43,11 +48,22 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
   setPadMuteMode,
   onTogglePadMute,
   onTogglePadSolo,
+  keyboardSettings,
+  onOpenKeyboardSettings,
+  onSelectGridSize,
+  externalHitPadId,
 }) => {
   // Visual hit flash states: map of padId -> timestamp
   const [activeHits, setActiveHits] = useState<Record<number, number>>({});
   const repeatIntervalRef = useRef<number | null>(null);
   const activeHeldPadRef = useRef<{ pad: PadConfig; velocity: number } | null>(null);
+
+  // Flash when an external keyboard hit occurs
+  useEffect(() => {
+    if (externalHitPadId !== undefined && externalHitPadId !== null) {
+      setActiveHits(prev => ({ ...prev, [externalHitPadId]: Date.now() }));
+    }
+  }, [externalHitPadId]);
 
   // Bank pads filtering: Bank A (0-15), B (16-31), C (32-47), D (48-63)
   const bankOffset = activeBank === 'A' ? 0 : activeBank === 'B' ? 16 : activeBank === 'C' ? 32 : 48;
@@ -117,12 +133,10 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
 
     // 16 Levels modulation
     if (sixteenLevelsMode === 'velocity') {
-      // Index in current bank: 0 to 15
       const idx = pad.id % 16;
       finalVelocity = (idx + 1) / 16;
     } else if (sixteenLevelsMode === 'tune') {
       const idx = pad.id % 16;
-      // Spread -12 to +3 semitones
       pitchOffset = idx - 12;
     }
 
@@ -142,10 +156,9 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
     e.preventDefault();
     audioEngine.initAudio();
 
-    // Calculate velocity based on vertical touch position (Akai MPC tactile feel)
+    // Calculate velocity based on vertical touch position
     const rect = e.currentTarget.getBoundingClientRect();
-    const relativeY = (e.clientY - rect.top) / rect.height; // 0 (top) to 1 (bottom)
-    // Tapping bottom is harder (0.95 - 1.0), tapping top is lighter (0.5 - 0.7)
+    const relativeY = (e.clientY - rect.top) / rect.height;
     let vel = 0.55 + relativeY * 0.45;
     if (fullLevel) vel = 1.0;
 
@@ -158,32 +171,80 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
     }
   };
 
+  const gridSize = keyboardSettings.gridSize;
+  const gridRows = getGridOrder(gridSize);
+
+  // Dynamic grid style
+  const gridClass =
+    gridSize === 9
+      ? 'grid-cols-3 grid-rows-3'
+      : gridSize === 12
+      ? 'grid-cols-4 grid-rows-3'
+      : gridSize === 15
+      ? 'grid-cols-5 grid-rows-3'
+      : 'grid-cols-4 grid-rows-4';
+
   return (
     <div className="flex flex-col h-full bg-[#101115] p-2 sm:p-3 rounded-lg border border-[#21242e] shadow-xl select-none">
       {/* MPC Bank and Performance Toolbar */}
-      <div className="flex items-center justify-between gap-1.5 sm:gap-2 mb-2 pb-2 border-b border-[#1f222b]">
+      <div className="flex items-center justify-between gap-1.5 sm:gap-2 mb-2 pb-2 border-b border-[#1f222b] overflow-x-auto no-scrollbar">
         {/* Bank Selectors (A, B, C, D) */}
-        <div className="flex items-center bg-[#171920] p-0.5 rounded-lg border border-[#2a2d39]">
+        <div className="flex items-center bg-[#171920] p-0.5 rounded-lg border border-[#2a2d39] shrink-0">
           {(['A', 'B', 'C', 'D'] as PadBank[]).map(bank => {
             const isActive = activeBank === bank;
             return (
               <button
                 key={bank}
                 onClick={() => setActiveBank(bank)}
-                className={`px-2.5 sm:px-3.5 py-1 text-xs font-bold rounded transition-all ${
+                className={`px-2.5 sm:px-3 py-1 text-xs font-bold rounded transition-all ${
                   isActive
                     ? 'bg-gradient-to-b from-red-600 to-rose-700 text-white shadow-md shadow-red-900/30'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                 }`}
               >
-                BANK {bank}
+                {bank}
               </button>
             );
           })}
         </div>
 
-        {/* MPC Hardware Buttons: FULL LEVEL, 16 LEVELS, NOTE REPEAT, PAD MUTE */}
-        <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto no-scrollbar">
+        {/* Pad Grid Size Selectors (9, 12, 15, 16) */}
+        <div className="flex items-center bg-[#171920] p-0.5 rounded-lg border border-[#2a2d39] shrink-0">
+          {([9, 12, 15, 16] as PadGridSize[]).map(size => {
+            const isSelected = gridSize === size;
+            return (
+              <button
+                key={size}
+                onClick={() => onSelectGridSize(size)}
+                className={`px-2 py-1 text-[11px] font-mono font-bold rounded transition-all ${
+                  isSelected
+                    ? 'bg-amber-500 text-black shadow-sm font-extrabold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title={`Switch to ${size} pads layout`}
+              >
+                {size}P
+              </button>
+            );
+          })}
+        </div>
+
+        {/* MPC Hardware Buttons: FULL LEVEL, 16 LEVELS, NOTE REPEAT, PAD MUTE, KEYBOARD SETTING */}
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Keyboard / PC setting button */}
+          <button
+            onClick={onOpenKeyboardSettings}
+            className={`px-2 py-1 text-[11px] font-bold rounded border transition-all whitespace-nowrap active:scale-95 flex items-center gap-1 ${
+              keyboardSettings.enabled
+                ? 'bg-[#1e2332] text-amber-300 border-amber-500/40 hover:bg-[#252b3d]'
+                : 'bg-[#181a22] text-slate-400 border-[#282c38] hover:text-slate-200'
+            }`}
+            title="Configure PC/Laptop Keyboard & MIDI Settings"
+          >
+            <Keyboard className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden xs:inline">KEYS</span>
+          </button>
+
           {/* Full Level */}
           <button
             onClick={() => setFullLevel(!fullLevel)}
@@ -209,9 +270,9 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
                 ? 'bg-purple-600 text-white border-purple-400 shadow-sm shadow-purple-600/30'
                 : 'bg-[#181a22] text-slate-400 border-[#282c38] hover:text-slate-200'
             }`}
-            title="16 Levels Mode (Spread Tune or Velocity across all 16 pads)"
+            title="16 Levels Mode (Spread Tune or Velocity across pads)"
           >
-            16 LVL {sixteenLevelsMode === 'tune' ? '(TUNE)' : sixteenLevelsMode === 'velocity' ? '(VEL)' : ''}
+            16 LVL
           </button>
 
           {/* Note Repeat */}
@@ -226,7 +287,7 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
               title="Note Repeat (Hold pad to repeat hits)"
             >
               <Repeat className="w-3 h-3" />
-              <span>REPEAT</span>
+              <span className="hidden sm:inline">REPEAT</span>
             </button>
             {noteRepeat && (
               <select
@@ -258,14 +319,9 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
         </div>
       </div>
 
-      {/* 4x4 Grid of 16 MPC Pads (Rendered in classic Akai order: Row 4 (13-16) at top, Row 1 (1-4) at bottom) */}
-      <div className="grid grid-cols-4 grid-rows-4 gap-2 sm:gap-2.5 flex-1 min-h-[320px] max-h-[560px] touch-none">
-        {[
-          [12, 13, 14, 15], // Top row: Pads 13, 14, 15, 16
-          [8, 9, 10, 11],   // Row 3: Pads 9, 10, 11, 12
-          [4, 5, 6, 7],     // Row 2: Pads 5, 6, 7, 8
-          [0, 1, 2, 3],     // Bottom row: Pads 1, 2, 3, 4
-        ].flatMap((row) =>
+      {/* Grid of MPC Pads (Configurable: 9, 12, 15, or 16 Pads) */}
+      <div className={`grid ${gridClass} gap-2 sm:gap-2.5 flex-1 min-h-[320px] max-h-[580px] touch-none`}>
+        {gridRows.flatMap((row) =>
           row.map((padIndex) => {
             const pad = currentBankPads[padIndex] || pads[padIndex];
             if (!pad) return null;
@@ -273,6 +329,9 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
             const isHit = Boolean(activeHits[pad.id]);
             const isSelected = selectedPadId === pad.id;
             const displayNum = padIndex + 1;
+            const keyLabel = keyboardSettings.showKeyLabels
+              ? formatKeyDisplay(keyboardSettings.keyMap[padIndex])
+              : null;
 
             return (
               <button
@@ -307,11 +366,20 @@ export const PadMatrix: React.FC<PadMatrixProps> = ({
                   }}
                 />
 
-                {/* Top Pad Header: Number & Bank */}
+                {/* Top Pad Header: Number & Bank + Keyboard Shortcut Badge */}
                 <div className="flex items-center justify-between w-full">
-                  <span className="font-mono text-[10px] sm:text-xs font-bold text-slate-400">
-                    {activeBank}{String(displayNum).padStart(2, '0')}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[10px] sm:text-xs font-bold text-slate-400">
+                      {activeBank}{String(displayNum).padStart(2, '0')}
+                    </span>
+
+                    {/* Keyboard Key Hint Badge */}
+                    {keyLabel && (
+                      <span className="px-1.5 py-0.2 rounded bg-black/60 border border-slate-700/80 text-[10px] font-mono font-bold text-amber-300 shadow-sm">
+                        {keyLabel}
+                      </span>
+                    )}
+                  </div>
 
                   {/* Mute Indicator or Category Dot */}
                   {pad.isMuted ? (

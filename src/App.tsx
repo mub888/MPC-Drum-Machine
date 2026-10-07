@@ -13,11 +13,14 @@ import {
   AudioStemClip,
   MasterEffectsConfig,
   ProjectState,
-  SoundKit
+  SoundKit,
+  KeyboardSettings,
+  PadGridSize
 } from './types';
 import { audioEngine } from './audio/engine';
 import { createSoundKits } from './audio/sampleLibrary';
 import { createTrapPattern, createBoomBapPattern, createHousePattern, createEmptyPattern } from './audio/defaultPatterns';
+import { getDefaultKeyMap, webMidiManager } from './audio/keyboardService';
 import { TopTransport } from './components/TopTransport';
 import { PadMatrix } from './components/PadMatrix';
 import { StepSequencer } from './components/StepSequencer';
@@ -26,6 +29,7 @@ import { MixerRack } from './components/MixerRack';
 import { SongArranger } from './components/SongArranger';
 import { KitBrowserModal } from './components/KitBrowserModal';
 import { ExportModal } from './components/ExportModal';
+import { KeyboardSettingsModal } from './components/KeyboardSettingsModal';
 import { Grid, Sliders, Music, Disc, Layers, Mic } from 'lucide-react';
 
 export default function App() {
@@ -91,6 +95,18 @@ export default function App() {
   // Modals
   const [isKitBrowserOpen, setIsKitBrowserOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isKeyboardModalOpen, setIsKeyboardModalOpen] = useState(false);
+
+  // Keyboard & Pad Grid Settings (9, 12, 15, 16 pads)
+  const [keyboardSettings, setKeyboardSettings] = useState<KeyboardSettings>({
+    enabled: true,
+    showKeyLabels: true,
+    preset: 'qwerty',
+    keyMap: getDefaultKeyMap('qwerty', 16),
+    gridSize: 16,
+    midiEnabled: false,
+  });
+  const [externalHitPadId, setExternalHitPadId] = useState<number | null>(null);
 
   // Initialize Audio & Sound Kits on startup
   useEffect(() => {
@@ -206,6 +222,110 @@ export default function App() {
     setCurrentStep(0);
   };
 
+  // Keyboard, Pad & MIDI Trigger handler
+  const triggerPadByIndex = useCallback((padIndex: number, velocity: number = 1.0) => {
+    const bankOffset = activeBank === 'A' ? 0 : activeBank === 'B' ? 16 : activeBank === 'C' ? 32 : 48;
+    const targetPad = pads[bankOffset + padIndex] || pads[padIndex];
+    if (targetPad) {
+      let finalVel = fullLevel ? 1.0 : velocity;
+      let pitchOffset = 0;
+      if (sixteenLevelsMode === 'velocity') {
+        finalVel = (padIndex + 1) / (keyboardSettings.gridSize || 16);
+      } else if (sixteenLevelsMode === 'tune') {
+        pitchOffset = padIndex - 12;
+      }
+      audioEngine.triggerPad(targetPad, finalVel, pitchOffset);
+      setExternalHitPadId(targetPad.id);
+      setTimeout(() => setExternalHitPadId(null), 120);
+    }
+  }, [activeBank, pads, fullLevel, sixteenLevelsMode, keyboardSettings.gridSize]);
+
+  // Connect Web MIDI Controller automatically if supported
+  useEffect(() => {
+    webMidiManager.init((padIdx, vel) => {
+      triggerPadByIndex(padIdx, vel);
+    }).then(connected => {
+      if (connected && webMidiManager.connectedDevices.length > 0) {
+        setKeyboardSettings(prev => ({
+          ...prev,
+          midiEnabled: true,
+          midiDeviceName: webMidiManager.connectedDevices.join(', '),
+        }));
+      }
+    });
+  }, [triggerPadByIndex]);
+
+  // Global Keyboard event listener for PC / Laptop / External Keyboards
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't capture when typing in inputs/textareas
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      // Hotkey: Space = Play/Stop
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handlePlayToggle();
+        return;
+      }
+
+      // Hotkey: R = Record
+      if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        handleRecordToggle();
+        return;
+      }
+
+      // Hotkey: M = Metronome
+      if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setMetronome(prev => !prev);
+        return;
+      }
+
+      // Hotkey: Shift + Digit1-4 = Switch Banks A, B, C, D
+      if (e.shiftKey && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) {
+        e.preventDefault();
+        const bankMap: Record<string, PadBank> = { Digit1: 'A', Digit2: 'B', Digit3: 'C', Digit4: 'D' };
+        if (bankMap[e.code]) setActiveBank(bankMap[e.code]);
+        return;
+      }
+
+      if (!keyboardSettings.enabled) return;
+
+      // Check if e.code is mapped to an active pad
+      const keyMap = keyboardSettings.keyMap;
+      for (const [padIdxStr, mappedCode] of Object.entries(keyMap)) {
+        if (mappedCode === e.code) {
+          const padIdx = parseInt(padIdxStr, 10);
+          if (padIdx < keyboardSettings.gridSize) {
+            e.preventDefault();
+            triggerPadByIndex(padIdx, 1.0);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [keyboardSettings, triggerPadByIndex, handlePlayToggle, handleRecordToggle]);
+
+  const handleSelectGridSize = (size: PadGridSize) => {
+    setKeyboardSettings(prev => ({
+      ...prev,
+      gridSize: size,
+      keyMap: getDefaultKeyMap(prev.preset, size),
+    }));
+  };
+
   // Sound Kit Selection
   const handleSelectKit = (kit: SoundKit) => {
     setCurrentKitId(kit.id);
@@ -284,6 +404,7 @@ export default function App() {
         currentKitName={currentKitName}
         onOpenKitBrowser={() => setIsKitBrowserOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
+        onOpenKeyboardSettings={() => setIsKeyboardModalOpen(true)}
         masterVolume={effects.masterVolume}
         setMasterVolume={(vol) => {
           setEffects(prev => ({ ...prev, masterVolume: vol }));
@@ -316,6 +437,10 @@ export default function App() {
             setPadMuteMode={setPadMuteMode}
             onTogglePadMute={handleTogglePadMute}
             onTogglePadSolo={handleTogglePadSolo}
+            keyboardSettings={keyboardSettings}
+            onOpenKeyboardSettings={() => setIsKeyboardModalOpen(true)}
+            onSelectGridSize={handleSelectGridSize}
+            externalHitPadId={externalHitPadId}
           />
         )}
 
@@ -455,6 +580,16 @@ export default function App() {
             setEffects(loaded.effects);
           }}
           onClose={() => setIsExportModalOpen(false)}
+        />
+      )}
+
+      {isKeyboardModalOpen && (
+        <KeyboardSettingsModal
+          settings={keyboardSettings}
+          onUpdateSettings={setKeyboardSettings}
+          pads={pads}
+          onTriggerPad={triggerPadByIndex}
+          onClose={() => setIsKeyboardModalOpen(false)}
         />
       )}
     </div>

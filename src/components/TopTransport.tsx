@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Square, Circle, Volume2, Music2, Download, Save, Mic, RotateCcw } from 'lucide-react';
+import { Play, Square, Circle, Volume2, Music2, Download, Save, Mic, RotateCcw, Keyboard } from 'lucide-react';
 import { audioEngine } from '../audio/engine';
 
 interface TopTransportProps {
@@ -20,6 +20,7 @@ interface TopTransportProps {
   currentKitName: string;
   onOpenKitBrowser: () => void;
   onOpenExportModal: () => void;
+  onOpenKeyboardSettings: () => void;
   masterVolume: number;
   setMasterVolume: (vol: number) => void;
 }
@@ -42,6 +43,7 @@ export const TopTransport: React.FC<TopTransportProps> = ({
   currentKitName,
   onOpenKitBrowser,
   onOpenExportModal,
+  onOpenKeyboardSettings,
   masterVolume,
   setMasterVolume,
 }) => {
@@ -209,6 +211,16 @@ export const TopTransport: React.FC<TopTransportProps> = ({
 
         {/* Transport & Primary Actions */}
         <div className="flex items-center gap-1 sm:gap-2">
+          {/* Keyboard / Controller settings button */}
+          <button
+            onClick={onOpenKeyboardSettings}
+            className="px-2 py-1.5 rounded bg-[#1e222c] hover:bg-[#2b303e] border border-[#2e3444] text-[11px] font-semibold text-amber-300 hover:text-amber-200 active:scale-95 transition-all flex items-center gap-1"
+            title="Laptop/PC Keyboard & External Pad Settings"
+          >
+            <Keyboard className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline">KEYS</span>
+          </button>
+
           {/* Tap Tempo Button */}
           <button
             onClick={handleTapTempo}
