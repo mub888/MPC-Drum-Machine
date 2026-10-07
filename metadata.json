@@ -1,0 +1,9 @@
+{
+  "name": "DroidMPC Pro - Mobile Music Workstation",
+  "description": "Professional mobile music production studio and sampler for Android. Features 64 MPC pads, live audio sampling and chopping, step sequencer, multitrack mixer, vintage MPC effects, and song arranger.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
